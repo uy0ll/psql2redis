@@ -1,0 +1,30 @@
+DB_SETTINGS:
+    host: 127.0.0.1
+    port: "5432"
+    user: root
+    passwd: "root"
+    db: ttn_lorawan_dev
+
+REDIS_SETTINGS:
+    host: 127.0.0.1
+    port: 6379
+    db: 0
+    db_remote: 0
+    password:
+    server_id: 3
+    log_pos_prefix: log_pos_
+
+SELF:
+    slot_name: redis_slot
+    start_lsn: 0
+    only_events: None
+    ignored_events: None
+    only_tables:
+       - end_devices
+       - gateways
+       - applications
+    ignored_tables: None
+    only_schemas:
+       - public
+    ignored_schemas: None
+    use_add_table_option: True
