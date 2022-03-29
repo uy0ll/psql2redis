@@ -36,11 +36,25 @@ In your TheThingStack docker-compose.yml configuration file you need to enable r
 
 #before you start:
 
+# Cloud server:
 1. create_replication_slot
-2. set postgres and redis config in your config.yml
+2. set postgres and redis config in your cloud-config.yml
+3. set CMD [ "python3", "-m", "psycopg2", "./cloud.py" ] in your Dockerfile
+4. Build an image from a Dockerfile using script build-docker.sh
+5. copy file docker-compose-CLOUD.yml in your "Lorawan-Stack" folder and rename to docker-compose.yml
 
+# Edge server:
+1. set postgres and redis config in your edge-config.yml
+2. set CMD [ "python3", "-m", "psycopg2", "./edge.py" ] in your Dockerfile
+3. Build an image from a Dockerfile using script build-docker.sh
+4. copy docker-compose-EDGE.yml in your "Lorawan-Stack" folder and rename to docker-compose.yml
+
+
+#Block diagram of the workflow for Cloud server
 
 ![GUI screenshot](https://github.com/uy0ll/psql2redis/blob/v1.0-alfa/Cloud.jpg)
+
+#Block diagram of the workflow for Edge server
 ![GUI screenshot](https://github.com/uy0ll/psql2redis/blob/v1.0-alfa/Edge.jpg)
 
 #ref
