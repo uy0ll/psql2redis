@@ -6,23 +6,23 @@ DB_SETTINGS:
     db: ttn_lorawan_dev
 
 REDIS_SETTINGS:
-    host: 127.0.0.1
+    cloud_host: 127.0.0.1
+    edge_host: "client.lorawan.co.ua"
     port: 6379
-    db: 0
-    db_remote: 0
+    db_cloud: 0
+    db_replica: 1
+    db_devlist: 2
+    db_edge: 0
     password:
-    server_id: 3
-    log_pos_prefix: log_pos_
 
 SELF:
     slot_name: redis_slot
     start_lsn: 0
     only_events: None
-    ignored_events: None
+    ignored_events:
+       - insert
     only_tables:
        - end_devices
-       - gateways
-       - applications
     ignored_tables: None
     only_schemas:
        - public

@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  pgsql2redis:
+    image: pgsql2redis
+    command: python3 edge.py edge-config.yaml
+    volumes:
+      - /home/da/Develop/psql2r/
+    ports:
+      - "127.0.0.1:6378:6379"
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - postgres

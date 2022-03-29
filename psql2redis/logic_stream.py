@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-
-import psycopg2
-import json
+import ast
 import logging
 import redis
 import psycopg2
+import json
+import time
+
 from psycopg2 import extras
 from psycopg2.extras import LogicalReplicationConnection
 
@@ -28,6 +29,121 @@ class WalJsonError(Exception):
         super().__init__()
         self.err_json = err_json
 
+class LogicRedisReader(object):
+
+    def __init__(self, config):
+
+        self.config = config
+        self.REDIS_SETTINGS = config["REDIS_SETTINGS"]
+        self.SELF = config["SELF"]
+
+#       REDIS_SETTINGS
+        self.redis_client = redis.StrictRedis(
+            host=self.REDIS_SETTINGS["cloud_host"],
+            port=self.REDIS_SETTINGS["port"],
+            db=self.REDIS_SETTINGS["db_cloud"],
+            password=self.REDIS_SETTINGS["password"]
+        )
+        self.edge_host = self.REDIS_SETTINGS["edge_host"]
+        self.db_replica = self.REDIS_SETTINGS["db_replica"]
+        self.db_devlist = self.REDIS_SETTINGS["db_devlist"]
+
+#       SELF_SETTINGS
+        self.none_times = 0  # we compute the total sleep in logic_stream
+        self.stream_connection = None
+        self.replica_redis = None
+
+    def connect_to_cloud(self):
+        # init redis client
+        self.replica_redis = redis.StrictRedis(
+            host=self.REDIS_SETTINGS["cloud_host"],
+            port=self.REDIS_SETTINGS["port"],
+            db=self.REDIS_SETTINGS["db_replica"],
+            password=self.REDIS_SETTINGS["password"]
+        )
+
+    def redis_cloud2edge(self):
+
+        status_interval = 10.0
+        while True:
+            try:
+                keys = self.replica_redis.hkeys(self.edge_host)
+            except redis.RedisError as error:
+                logger.exception('Load raw replication error')
+                self.replica_redis.close()
+                continue
+
+            if not keys:
+                now = datetime.now()
+                timeout = status_interval - (datetime.now() - now).total_seconds()
+                try:
+                    sel = select([], [], [], max(0, timeout))
+                except InterruptedError:
+                    pass  # recalculate timeout and continue
+
+            self.dev_redis = redis.StrictRedis(
+                host=self.REDIS_SETTINGS["cloud_host"],
+                port=self.REDIS_SETTINGS["port"],
+                db=self.REDIS_SETTINGS["db_devlist"],
+                password=self.REDIS_SETTINGS["password"]
+            )
+            self.edge_redis = redis.StrictRedis(
+                host=self.REDIS_SETTINGS["edge_host"],
+                port=self.REDIS_SETTINGS["port"],
+                db=self.REDIS_SETTINGS["db_edge"],
+                password=self.REDIS_SETTINGS["password"]
+            )
+
+
+            for key in keys:
+                row = ast.literal_eval(self.replica_redis.hget(self.edge_host, key).decode("UTF-8"))
+                if row['kind'] == "delete":
+                    self.delete_redis(row)
+                elif row['kind'] == "update":
+                    self.update_redis(row)
+                self.replica_redis.hdel( self.edge_host, ast.literal_eval(key.decode("UTF-8")) )
+
+    def getList(self, dict):
+        return list(dict.keys())
+
+
+    def delete_redis(self, row):
+
+        remote_host = self.edge_host
+        dev_uuid = row['oldkeys']['keyvalues'][0]
+        dev_eui = self.dev_redis.hget(remote_host, dev_uuid)
+        dev_eui = '*' + dev_eui.decode("UTF-8")  + '*'
+        prefixes = self.edge_redis.keys(dev_eui)
+        for prefix in prefixes:
+            self.edge_redis.delete(prefix.decode("UTF-8"))
+
+        self.dev_redis.hdel(remote_host, dev_uuid)
+#        dev_eui = self.dev_redis.hget(remote_host, dev_uuid[0]).decode("utf-8")
+
+#        dev_list = self.dev_redis.hvals(remote_host)
+#        dev_count = self.dev_redis.hlen(remote_host)
+#        dict = self.getList(self.dev_redis.hgetall(remote_host))
+
+#        for key in range(0,dev_count):
+#            value = dev_list[key]
+#            print ("VALUE: :", value.decode("utf-8"))
+#            if value.decode("utf-8") == dev_eui:
+#                uuid = dict[key]
+#                print ("UUID: ", uuid.decode("utf-8"))
+#                self.dev_redis.hdel(remote_host, uuid.decode("utf-8"))
+
+        return
+
+    def update_redis(self, row):
+
+        dev_eui = '*' + row['columnvalues'][row['columnnames'].index('dev_eui')] + '*'
+        prefixes = self.redis_client.keys(dev_eui)
+        for prefix in prefixes:
+            self.edge_redis.set(prefix.decode("UTF-8"), self.redis_client.get(prefix).decode("UTF-8") )
+
+        return
+
+
 class LogicStreamReader(object):
 
     def __init__(self, config,
@@ -49,13 +165,14 @@ class LogicStreamReader(object):
 
 #       REDIS_SETTINGS
         self.redis_client = redis.StrictRedis(
-            host=self.REDIS_SETTINGS["host"],
+            host=self.REDIS_SETTINGS["cloud_host"],
             port=self.REDIS_SETTINGS["port"],
-            db=self.REDIS_SETTINGS["db"],
+            db=self.REDIS_SETTINGS["db_cloud"],
             password=self.REDIS_SETTINGS["password"]
         )
-        self.log_pos_prefix=self.REDIS_SETTINGS["log_pos_prefix"],
-        self.server_id=self.REDIS_SETTINGS["server_id"]
+        self.edge_host = self.REDIS_SETTINGS["edge_host"]
+        self.db_replica = self.REDIS_SETTINGS["db_replica"]
+        self.db_devlist = self.REDIS_SETTINGS["db_devlist"]
 
 #       SELF_SETTINGS
         self.slot_name = self.SELF["slot_name"]
@@ -74,6 +191,7 @@ class LogicStreamReader(object):
         self.use_add_table_option = self.SELF["use_add_table_option"]
         self.allowed_events = self.allowed_event_list(
             self.SELF["only_events"], self.SELF["ignored_events"])
+
         only_schema_tables = []
         # AWS POSTGRES don't support the add-table
         for schema in self.only_schemas:
@@ -86,6 +204,12 @@ class LogicStreamReader(object):
         if self.connected_stream:
             self.conn.close()
             self.connected_stream = False
+
+    def edge_close(self):
+        self.edge_redis.close()
+        self.dev_redis.close()
+        self.replica_redis.close()
+        self.redis_client.close()
 
     def connect_to_stream(self):
         self.conn = psycopg2.connect(
@@ -114,19 +238,18 @@ class LogicStreamReader(object):
             self.cur.start_replication(
                 slot_name=self.slot_name,
                 decode=True,
-                start_lsn=flush_lsn,   # first we debug don't flush
+                start_lsn=self.flush_lsn,   # first we debug don't flush
                 options=options
             )
         self.connected_stream = True
 
         # init redis client
         self.redis_client = redis.StrictRedis(
-            host=self.REDIS_SETTINGS["host"],
+            host=self.REDIS_SETTINGS["cloud_host"],
             port=self.REDIS_SETTINGS["port"],
-            db=self.REDIS_SETTINGS["db"],
+            db=self.REDIS_SETTINGS["db_cloud"],
             password=self.REDIS_SETTINGS["password"]
         )
-
 
     def send_feedback(self, lsn=None, keep_live=False):
         if not self.connected_stream:
@@ -157,7 +280,6 @@ class LogicStreamReader(object):
 
         status_interval = 10.0
         while True:
-
             try:
                 pkt = self.cur.read_message()
             except psycopg2.DatabaseError as error:
@@ -165,7 +287,6 @@ class LogicStreamReader(object):
                 self.stream_connection.close()
                 self.connected_stream = False
                 continue
-
             if pkt:
                 self.consume(pkt)
             else:
@@ -224,103 +345,143 @@ class LogicStreamReader(object):
                     self.ignored_schemas)
 
                 for change in changes:
-                    prefix = "%s:%s:" % (change["schema"], change["table"])
-
                     if change["kind"] == "delete":
-                        print ( change['oldkeys']['keyvalues'] )
                         self.delete_handler(change)
-
                     elif change["kind"] == "update":
                         self.update_handler(change)
-
-                    elif change["kind"] == "insert":
+                    elif (change["kind"] == "insert" and change["kind"] != self.SELF["ignored_events"][0]):
                         self.insert_handler(change)
 
                 if not wraper.events:
-                    continue
-                return wraper.events
-
+                   continue
+#                return wraper.events
             else:
                 # seem like last wal have finished we send it
                 self.send_feedback(self.flush_lsn)
 
-
     def allowed_event_list(self, only_events, ignored_events):
-        if only_events is not None:
+
+        if only_events != "None":
             events = set(only_events)
         else:
             events = {
                 UpdateRowEvent,
                 WriteRowEvent,
-                DeleteRowEvent,
+                DeleteRowEvent
             }
-        if ignored_events is not None:
+        if ignored_events != "None":
             for e in ignored_events:
-                events.remove(e)
-
+                if e == "insert":
+                    events.remove(WriteRowEvent)
+                elif e == "update":
+                    events.remove(UpdateRowEvent)
+                elif e == "delete":
+                    events.remove(DeleteRowEvent)
         return frozenset(events)
 
     def __iter__(self):
         return iter(self.fetchone, None)
 
     def delete_handler(self, row):
-         print (row)
-#        self.redis_client.delete(prefix + str(vals["keyvalues"]))
 
-    def update_handler(self, row):
-        self.redis_prefix(row)
-
-    def insert_handler(self, row):
-#        print ( row['columnvalues'][row['columnnames'].index('id')] )
-#        adr = prefix + '@' + row['columnvalues'][val]
-        self.redis_prefix(row)
-
-    def set_log_pos(self, log_file, log_pos):
-        key = "%s%s" % (self.log_pos_prefix, self.server_id)
-        self.redis_client.hmset(key, {'log_pos': log_pos, 'log_file': log_file})
-
-    def get_log_pos(self):
-        key = "%s%s" % (self.log_pos_prefix, self.server_id)
-        ret = self.redis_client.hgetall(key)
-        return self.redis_client.get("log_file"), ret.get("log_pos")
-
-    def redis_prefix(self, changes):
-
-        # init remote redis client
-        self.remote_redis = redis.StrictRedis(
-            host=remote_host,
+        self.replica_redis = redis.StrictRedis(
+            host=self.REDIS_SETTINGS["cloud_host"],
             port=self.REDIS_SETTINGS["port"],
-            db=self.REDIS_SETTINGS["db_remote"],
+            db=self.REDIS_SETTINGS["db_replica"],
             password=self.REDIS_SETTINGS["password"]
         )
 
-        dev_eui = changes['columnvalues'][changes['columnnames'].index('dev_eui')]
-        join_eui = changes['columnvalues'][changes['columnnames'].index('join_eui')]
-        application_id = changes['columnvalues'][changes['columnnames'].index('application_id')]
-        device_id = changes['columnvalues'][changes['columnnames'].index('device_id')]
-        remote_host = changes['columnvalues'][changes['columnnames'].index('application_server_address')]
+        self.dev_redis = redis.StrictRedis(
+            host=self.REDIS_SETTINGS["cloud_host"],
+            port=self.REDIS_SETTINGS["port"],
+            db=self.REDIS_SETTINGS["db_devlist"],
+            password=self.REDIS_SETTINGS["password"]
+        )
 
-        as_dev = "ttn:v3:as:devices:eui:" + dev_eui + ":"+ join_eui
-        as_uid = "ttn:v3:as:devices:uid:" + application_id +':'+ device_id
-        js_dev = "ttn:v3:js:devices:eui:" + join_eui +":"+ dev_eui
-        js_uid = "ttn:v3:js:devices:uid:" + application_id +':'+ device_id
-        ns_dev = "ttn:v3:ns:devices:eui:" + join_eui +":"+ dev_eui
-        ns_uid = "ttn:v3:ns:devices:uid:" + application_id +":"+ device_id
+        remote_host = self.edge_host
+        dev_uuid = row["oldkeys"]["keyvalues"]
+        dev_eui = self.dev_redis.hget(remote_host, dev_uuid[0]).decode("utf-8")
+#        print ("DEV_EUI=", dev_eui)
+#        for key in self.replica_redis.scan_iter():
+#            print ("KEYS: ", key.decode("utf-8"))
 
-        val = self.redis_client.get(as_dev)
-        self.remote_redis.set(as_dev, val)
-        val = self.redis_client.get(as_uid)
-        self.remote_redis.set(as_uid, val)
+        keys = self.replica_redis.hlen(remote_host)
+        keys = keys + 1
+        self.replica_redis.hset(remote_host, keys, str(row).encode() )
 
-        val = self.redis_client.get(js_dev)
-        self.remote_redis.set(js_dev, val)
-        val = self.redis_client.get(js_uid)
-        self.remote_redis.set(js_uid, val)
-
-        val = self.redis_client.get(ns_dev)
-        self.remote_redis.set(ns_dev, val)
-        val = self.redis_client.get(ns_uid)
-        self.remote_redis.set(ns_uid, val)
-
-        self.remote_redis.close()
+        self.dev_redis.close()
+        self.replica_redis.close()
         return
+
+    def update_handler(self, row):
+        dev_eui = row['columnvalues'][row['columnnames'].index('dev_eui')]
+
+        try :
+            connection = psycopg2.connect(
+                user=self.user,
+                password=self.passwd,
+                host=self.host,
+                port=self.port,
+                database=self.db
+            )
+            cursor = connection.cursor()
+            postgreSQL_select_Query = "SELECT id FROM end_devices WHERE dev_eui='"+ dev_eui + "'"
+            cursor.execute(postgreSQL_select_Query)
+            dev_uuid = ''.join(cursor.fetchone())
+
+        except (Exception, psycopg2.Error) as error:
+            print("Error while fetching data from PostgreSQL", error)
+
+        finally:
+             # closing database connection.
+            if connection:
+                cursor.close()
+                connection.close()
+        # init cloud redis client
+        self.replica_redis = redis.StrictRedis(
+            host=self.REDIS_SETTINGS["cloud_host"],
+            port=self.REDIS_SETTINGS["port"],
+            db=self.REDIS_SETTINGS["db_replica"],
+            password=self.REDIS_SETTINGS["password"]
+        )
+
+        self.dev_redis = redis.StrictRedis(
+            host=self.REDIS_SETTINGS["cloud_host"],
+            port=self.REDIS_SETTINGS["port"],
+            db=self.REDIS_SETTINGS["db_devlist"],
+            password=self.REDIS_SETTINGS["password"]
+        )
+
+        remote_host = row['columnvalues'][row['columnnames'].index('application_server_address')]
+        keys = self.replica_redis.hlen(remote_host)
+        keys = keys + 1
+        self.dev_redis.hset(remote_host, dev_uuid, dev_eui )
+        self.replica_redis.hset(remote_host, keys, str(row).encode() )
+
+        self.dev_redis.close()
+        self.replica_redis.close()
+        return
+
+    def insert_handler(self, row):
+        return
+
+#        join_eui = row['columnvalues'][row['columnnames'].index('join_eui')]
+#        application_id = row['columnvalues'][row['columnnames'].index('application_id')]
+#        device_id = row['columnvalues'][row['columnnames'].index('device_id')]
+#        remote_host = row['columnvalues'][row['columnnames'].index('application_server_address')]
+
+#        as_dev = "ttn:v3:as:devices:eui:" + dev_eui + ":"+ join_eui
+#        as_uid = "ttn:v3:as:devices:uid:" + application_id +':'+ device_id
+#        js_dev = "ttn:v3:js:devices:eui:" + join_eui +":"+ dev_eui
+#        js_uid = "ttn:v3:js:devices:uid:" + application_id +':'+ device_id
+#        ns_dev = "ttn:v3:ns:devices:eui:" + join_eui +":"+ dev_eui
+#        ns_uid = "ttn:v3:ns:devices:uid:" + application_id +":"+ device_id
+
+#        redis_get_set(as_dev, as_uid)
+#        redis_get_set(js_dev, js_uid)
+#        redis_get_set(ns_dev, ns_uid)
+
+#        val = self.redis_client.get(dev, uid)
+#        self.remote_redis.set(dev, val)
+#        val = self.redis_client.get(uid)
+#        self.remote_redis.set(uid, val)

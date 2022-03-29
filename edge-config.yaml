@@ -1,0 +1,11 @@
+REDIS_SETTINGS:
+    cloud_host: "cloud.lorawan.internal.aceso.no"
+    edge_host: "client.lorawan.co.ua"
+    port: 6379
+    db_cloud: 0
+    db_edge: 0
+    db_replica: 1
+    db_devlist: 2
+    password:
+
+SELF:

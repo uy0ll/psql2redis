@@ -32,11 +32,13 @@ def main():
     if len(sys.argv) == 1:
         exit()
     conf = sys.argv[1]
+
     config = load_config(conf)
     syncer = LogicStreamReader(config)
     syncer.connect_to_stream()
 
     print("Starting streaming, press Control-C to end...", file=sys.stderr)
+
     try:
         syncer.fetchone()
     except KeyboardInterrupt:
