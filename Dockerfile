@@ -18,4 +18,4 @@ COPY . .
 # Expose the PostgreSQL, Redis ports
 EXPOSE 5432 6379
 
-CMD [ "python3", "-m", "psycopg2", "./cloud.py", "--host=0.0.0.0" ] 
+CMD [ "run", "--host=0.0.0.0" ] 
