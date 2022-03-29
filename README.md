@@ -40,6 +40,9 @@ In your TheThingStack docker-compose.yml configuration file you need to enable r
 2. set postgres and redis config in your config.yml
 
 
+![GUI screenshot](https://github.com/uy0ll/psql2redis/blob/v0.91/Cloud.jpg)
+![GUI screenshot](https://github.com/uy0ll/psql2redis/blod/v0.91/Edge.jpg)
+
 #ref
 -----
 https://www.postgresql.org/docs/10/static/logicaldecoding-example.html
