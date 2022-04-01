@@ -15,7 +15,6 @@ RUN pip3 install install -Ur requirements.txt
 
 COPY . .
 
-# Expose the PostgreSQL, Redis ports
-EXPOSE 5432 6379
+ENV TTN_LW_HEALTHCHECK_URL=http://cloud.lorawan.internal.aceso.no:1885/healthz/live
 
-CMD [ "run", "--host=0.0.0.0" ] 
+HEALTHCHECK --interval=1m --timeout=5s CMD curl -f $TTN_LW_HEALTHCHECK_URL || exit 1

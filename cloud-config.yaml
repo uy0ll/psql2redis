@@ -1,12 +1,12 @@
 DB_SETTINGS:
-    host: 127.0.0.1
-    port: "5432"
+    host: "cloud.lorawan.internal.aceso.no"
+    port: 5432
     user: root
     passwd: "root"
     db: ttn_lorawan_dev
 
 REDIS_SETTINGS:
-    cloud_host: 127.0.0.1
+    cloud_host: "cloud.lorawan.internal.aceso.no"
     edge_host: "client.lorawan.co.ua"
     port: 6379
     db_cloud: 0

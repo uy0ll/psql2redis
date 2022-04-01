@@ -414,6 +414,7 @@ class LogicStreamReader(object):
         return
 
     def update_handler(self, row):
+        dev_uuid = ''
         dev_eui = row['columnvalues'][row['columnnames'].index('dev_eui')]
 
         try :
@@ -465,23 +466,3 @@ class LogicStreamReader(object):
     def insert_handler(self, row):
         return
 
-#        join_eui = row['columnvalues'][row['columnnames'].index('join_eui')]
-#        application_id = row['columnvalues'][row['columnnames'].index('application_id')]
-#        device_id = row['columnvalues'][row['columnnames'].index('device_id')]
-#        remote_host = row['columnvalues'][row['columnnames'].index('application_server_address')]
-
-#        as_dev = "ttn:v3:as:devices:eui:" + dev_eui + ":"+ join_eui
-#        as_uid = "ttn:v3:as:devices:uid:" + application_id +':'+ device_id
-#        js_dev = "ttn:v3:js:devices:eui:" + join_eui +":"+ dev_eui
-#        js_uid = "ttn:v3:js:devices:uid:" + application_id +':'+ device_id
-#        ns_dev = "ttn:v3:ns:devices:eui:" + join_eui +":"+ dev_eui
-#        ns_uid = "ttn:v3:ns:devices:uid:" + application_id +":"+ device_id
-
-#        redis_get_set(as_dev, as_uid)
-#        redis_get_set(js_dev, js_uid)
-#        redis_get_set(ns_dev, ns_uid)
-
-#        val = self.redis_client.get(dev, uid)
-#        self.remote_redis.set(dev, val)
-#        val = self.redis_client.get(uid)
-#        self.remote_redis.set(uid, val)
