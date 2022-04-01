@@ -64,7 +64,7 @@ class LogicRedisReader(object):
 
     def redis_cloud2edge(self):
 
-        status_interval = 10.0
+        status_interval = 120.0
         while True:
             try:
                 keys = self.replica_redis.hkeys(self.edge_host)
