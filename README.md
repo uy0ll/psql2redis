@@ -37,7 +37,8 @@ In your TheThingStack docker-compose.yml configuration file you need to enable r
 # before you start:
 
 ## Cloud server:
-1. create_replication_slot
+1. create_replication_slot:
+     SELECT * FROM pg_create_logical_replication_slot('redis_slot', 'wal2json');
 2. set postgres and redis config in your cloud-config.yaml
 3. set server address in your Dockerfile
 4. Build an image from a Dockerfile using script build-docker.sh
